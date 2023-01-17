@@ -102,7 +102,7 @@ controlChar_handler:
 	inc KEYBOARD_readptr
 	cmp #$0a
 	beq enter
-	cmp #$0b
+	cmp #$09
 	beq tab
 	cmp #$08
 	beq backspace
