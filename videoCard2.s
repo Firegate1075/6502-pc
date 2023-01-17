@@ -16,7 +16,7 @@ KEYBOARD_flags		= $0002 ; Keyboard modifiers: %xxxxrcas, r:release, c:ctrl, a:al
 SCREEN_xptr		= $0010
 SCREEN_yptr		= $0011
 SCREEN_addressBuf	= $0014 ; 2 byte buffer
-
+SCREEN_charBuf		= $0016
 
 KEYBOARD_super		= %01000000
 KEYBOARD_altgr		= %00100000
@@ -41,7 +41,9 @@ reset:
 	sta KEYBOARD_flags
 	sta SCREEN_xptr
 	sta SCREEN_yptr
-
+	sta SCREEN_addressBuf
+	sta SCREEN_addressBuf + 1
+	sta SCREEN_charBuf
 
 ; 65C22 VIA setup ------------------------------------------------------
 
@@ -70,17 +72,18 @@ reset:
 
 ;	jsr screen_printString
 
-
 loop:
-	ldx KEYBOARD_readptr
-	cpx KEYBOARD_writeptr
-	beq loop
+
+; handle keyboard inputs
+	ldx KEYBOARD_readptr	; get the position of the last char read from the KEYBOARD Buffer
+	cpx KEYBOARD_writeptr	; check if the there are unchecked chars in the buffer
+	beq loop		; if not: loop
 
 	lda KEYBOARD_BUFFER, x
 	and #%01100000
-	beq controlChar_handler
+	beq controlChar_handler	; if the character is non-printable, go to the controlChar handler
 
-	lda KEYBOARD_BUFFER, x
+	lda KEYBOARD_BUFFER, x	; else print the char on screen
 
 	jsr screen_computeAddress
 	sta (SCREEN_addressBuf)
