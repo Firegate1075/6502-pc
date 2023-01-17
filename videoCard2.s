@@ -102,6 +102,8 @@ controlChar_handler:
 	inc KEYBOARD_readptr
 	cmp #$0a
 	beq enter
+	cmp #$0b
+	beq tab
 	cmp #$08
 	beq backspace
 	cmp #$1b
@@ -126,6 +128,29 @@ enter:
 	sta SCREEN_xptr
 
 	jmp loop
+
+tab:
+	lda #" "	; just do 4 spaces
+
+	jsr screen_computeAddress
+	sta (SCREEN_addressBuf)
+	inc SCREEN_xptr
+
+	jsr screen_computeAddress
+	sta (SCREEN_addressBuf)
+	inc SCREEN_xptr
+
+	jsr screen_computeAddress
+	sta (SCREEN_addressBuf)
+	inc SCREEN_xptr
+
+	jsr screen_computeAddress
+	sta (SCREEN_addressBuf)
+	inc SCREEN_xptr
+
+	jmp loop
+
+
 
 backspace:
 	lda SCREEN_xptr
