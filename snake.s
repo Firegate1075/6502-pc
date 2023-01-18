@@ -30,6 +30,18 @@ seed0       = $0020
 seed1       = $0021
 FRUIT_xptr  = $0022
 FRUIT_yptr  = $0023
+TAIL_ptr   	= $0024
+HEAD_ptr   	= $0025
+HEAD_dir  	= $0026
+
+; Direction constants for the HEAD
+DIRECTION_UP 		= 3
+DIRECTION_LEFT 		= 2
+DIRECTION_DOWN 		= 1
+DIRECTION_RIGHT 	= 0
+
+SNAKE_xStack= $0300
+SNAKE_yStack= $0400
 
 	.org $8000
 reset:
@@ -47,6 +59,12 @@ reset:
 	sta SCREEN_addressBuf
 	sta SCREEN_addressBuf + 1
 	sta SCREEN_charBuf
+	sta FRUIT_xptr
+	sta FRUIT_yptr
+	sta HEAD_ptr
+	sta TAIL_ptr
+	sta HEAD_dir
+
 
 ; 65C22 VIA setup ------------------------------------------------------
 
@@ -75,8 +93,11 @@ reset:
 
 ; init screen pointer
     lda #40         ; 0.5*XWIDTH
+	ldx HEAD_ptr
+	sta SNAKE_xStack, x 
     sta SCREEN_xptr 
     lda #16         ; 0.5*YWIDTH
+	sta SNAKE_yStack, x
     sta SCREEN_yptr
 
 ; init prng
@@ -84,14 +105,46 @@ reset:
     sta seed1
     sta seed0
     
+; place 1st fruit
+    jsr fruit_place
 
 loop:
-; update screen
+	jsr move_head
+
+; draw new head
+	jsr draw_head
+
+
+; check if fruit is hit
+	ldx HEAD_ptr
+    lda SNAKE_xStack, x
+    cmp FRUIT_xptr
+    bne loop_nofruit
+    lda SNAKE_yStack, x
+    cmp FRUIT_yptr
+    bne loop_nofruit 
+
+	jsr fruit_place
+	jmp loop_fruit_done
+
+loop_nofruit:
+; if fruit is not hit
+; clear previous tail
+	ldx TAIL_ptr
+	lda SNAKE_xStack, x
+	sta SCREEN_xptr
+	lda SNAKE_yStack, x
+	sta SCREEN_yptr
     jsr screen_computeAddress
-    lda #$ff ; 255 is a blank char 
+    lda #$20 ; $20 is SPACE 
     sta (SCREEN_addressBuf)
+; inc tail position
+	inc TAIL_ptr
 
+loop_fruit_done:
 
+	jsr tick_delay
+loop_handleInputs:
 ; handle keyboard inputs
 	ldx KEYBOARD_readptr	; get the position of the last char read from the KEYBOARD Buffer
 	cpx KEYBOARD_writeptr	; check if the there are unchecked chars in the buffer
@@ -101,15 +154,108 @@ loop:
 
 	lda KEYBOARD_BUFFER, x
 	and #%01100000
-	beq controlChar_handler	; if the character is non-printable, go to the controlChar handler
+	beq controlChar_handler_jumpMark	; if the character is non-printable, go to the controlChar handler
 
-	jmp loop
+	jmp loop_handleInputs
+controlChar_handler_jumpMark:
+	jmp controlChar_handler
+; end of loop
+draw_head:
+	ldx HEAD_ptr
+	lda SNAKE_xStack, x
+	sta SCREEN_xptr
+	lda SNAKE_yStack, x
+	sta SCREEN_yptr
+    
+	jsr screen_computeAddress
+    lda #$ff ; 255 is a blank char 
+    sta (SCREEN_addressBuf)
+	rts
+
+; move head-coords
+move_head:
+	lda HEAD_dir
+	cmp #DIRECTION_UP
+	beq move_head_up
+	cmp #DIRECTION_LEFT
+	beq move_head_left
+	cmp #DIRECTION_DOWN
+	beq move_head_down
+	cmp #DIRECTION_RIGHT
+	beq move_head_right
+; invalid direction: default to up
+move_head_up:
+	ldx HEAD_ptr
+	lda SNAKE_yStack, x
+	beq move_done		; skip if at upper border of screen
+	
+	dec 				; calculate new y-position
+	inx 
+	sta SNAKE_yStack, x	; store new y-position at new head-pos
+	
+	dex
+	lda SNAKE_xStack, x ; copy current x-position to new head-pos
+	inx
+	sta SNAKE_xStack, x
+	stx HEAD_ptr		; store new head-pos
+	rts
+
+move_head_left:
+	ldx HEAD_ptr
+	lda SNAKE_xStack, x
+	beq move_done
+
+	dec
+	inx
+	sta SNAKE_xStack, x
+
+	dex
+	lda SNAKE_yStack, x ; copy current y-position to new head-pos
+	inx
+	sta SNAKE_yStack, x
+	stx HEAD_ptr		; store new head-pos
+	rts
+
+move_head_down:
+	ldx HEAD_ptr
+	lda SNAKE_yStack, x
+	cmp #$1d
+	beq move_done
+
+	inc 
+	inx
+	sta SNAKE_yStack, x
+
+	dex
+	lda SNAKE_xStack, x ; copy current x-position to new head-pos
+	inx
+	sta SNAKE_xStack, x
+	stx HEAD_ptr		; store new head-pos
+	rts
+
+
+move_head_right:
+	ldx HEAD_ptr
+	lda SNAKE_xStack, x
+	cmp #$4e
+	beq move_done
+
+	inc 
+	inx
+	sta SNAKE_xStack, x
+
+	dex
+	lda SNAKE_yStack, x ; copy current y-position to new head-pos
+	inx
+	sta SNAKE_yStack, x
+	stx HEAD_ptr		; store new head-pos
+
+move_done:
+; game over
+	rts
+
 
 controlChar_handler:
-; first, clear cursor
-    lda #$20    ; load ascii-val of SPACE 
-    jsr screen_computeAddress
-    sta (SCREEN_addressBuf)
 
 	lda KEYBOARD_BUFFER, x
 
@@ -121,44 +267,32 @@ controlChar_handler:
 	beq arrowDown
 	cmp #$91
 	beq arrowRight
-	jmp loop
+	jmp loop_handleInputs
 
 
 arrowUp:
-	lda SCREEN_yptr
-	beq arrow_done		; skip if at upper border of screen
-
-	dec SCREEN_yptr
-	jmp loop
+	lda #DIRECTION_UP
+	sta HEAD_dir
+	jmp loop_handleInputs
 
 arrowLeft:
-	lda SCREEN_xptr
-	beq arrow_done
-
-	dec SCREEN_xptr
-	jmp loop
+	lda #DIRECTION_LEFT
+	sta HEAD_dir
+	jmp loop_handleInputs
 
 arrowDown:
-	lda SCREEN_yptr
-	cmp #$1d
-	beq arrow_done
-
-	inc SCREEN_yptr
-	jmp loop
-
+	lda #DIRECTION_DOWN
+	sta HEAD_dir
+	jmp loop_handleInputs
+	
 arrowRight:
-	lda SCREEN_xptr
-	cmp #$4e
-	beq arrow_done
-
-	inc SCREEN_xptr
-	jmp loop
-
-arrow_done:
-	jmp loop
+	lda #DIRECTION_RIGHT
+	sta HEAD_dir
+	jmp loop_handleInputs
+	
 
 random: ; pseudo-random number generator, see: https://codebase64.org/doku.php?id=base:small_fast_8-bit_prng
-    lda seed1
+	lda seed1
     beq random_doEor
     asl
     beq random_noEor ; if the input was $80, skip the EOR
@@ -171,14 +305,41 @@ random_noEor:
 
 fruit_place:
     jsr random
+; do random % $1e to create valid x-pos
+	sec 
+fruit_place_sub1:
+	sbc #$4f
+	bcs fruit_place_sub1
+	adc #$4f
     sta FRUIT_xptr
-    jsr random
+	sta SCREEN_xptr
+    
+	jsr random
+	sec
+fruit_place_sub2:
+	sbc #$1e
+	bcs fruit_place_sub2
+	adc #$1e
     sta FRUIT_yptr
+	sta SCREEN_yptr
 
     jsr screen_computeAddress
     lda #"O"
     sta (SCREEN_addressBuf)
+    
+    rts
 
+tick_delay:
+	ldy #$3f
+tick_innery:
+	ldx #$ff
+tick_innerx:
+	nop
+	dex
+	bne tick_innerx
+	dey
+	bne tick_innery
+	rts
 
 text:
 	.string "Hello world!"
