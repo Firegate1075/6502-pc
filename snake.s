@@ -119,7 +119,7 @@ newGame:
     jsr fruit_place
 
 loop:
-	jmp move_head ;move_head is basically a subroutine
+	jmp move_head ;move_head is basically a subroutine to create the next head position
 
 loop_headMoveDone:
 ; check if new head position is currently a drawn body-pixel
@@ -131,7 +131,7 @@ loop_headMoveDone:
 	jsr screen_computeAddress
 
 	lda (SCREEN_addressBuf)
-	cpx #$ff
+	cmp #$ff
 	bne loop_noCollision
 	jmp gameOver
 
@@ -350,7 +350,12 @@ fruit_place_sub2:
 	sta SCREEN_yptr
 
     jsr screen_computeAddress
-    lda #"O"
+; check if new fruit position is a snake pixel    
+	lda (SCREEN_addressBuf)
+	cmp #$ff
+	beq fruit_place ; if new fruit-pos is part of the snake, just scramble again
+	
+	lda #"O"
     sta (SCREEN_addressBuf)
     
     rts
@@ -373,11 +378,19 @@ gameOver_string:
 
 gameOver:
 	jsr screen_clearScreen	; put address of gameOver_string into SCREEN_printStringBuf
-	lda #gameOver_string
+	lda #gameOver_string & $ff
 	sta SCREEN_printStringBuf
-	lda #gameOver_string + 1
+	lda #gameOver_string >> 8
 	sta SCREEN_printStringBuf + 1
 
+; init screen pointer
+    lda #35         ; 0.5*XWIDTH - 5
+	ldx HEAD_ptr
+	sta SNAKE_xStack, x 
+    sta SCREEN_xptr 
+    lda #16         ; 0.5*YWIDTH
+	sta SNAKE_yStack, x
+    sta SCREEN_yptr
 	jsr screen_printString
 
 	jsr tick_delay
@@ -395,6 +408,8 @@ gameOver:
 	jsr tick_delay
 	jsr tick_delay
 	jsr tick_delay
+
+	jsr screen_clearScreen
 	jmp newGame
 
 
