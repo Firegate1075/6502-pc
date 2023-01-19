@@ -1,30 +1,31 @@
 SCREEN	= $4000 ; 79x30?-character VGA-screen (bug? why not 80x32 or 80x30)
 
-PORTB	= $6000
-PORTA	= $6001
-DDRB	= $6002
-DDRA	= $6003
-PCR 	= $600c
-IFR	= $600d
-IER	= $600e
+PORTB					= $6000
+PORTA					= $6001
+DDRB					= $6002
+DDRA					= $6003
+PCR 					= $600c
+IFR						= $600d
+IER						= $600e
 
-KEYBOARD_BUFFER 	= $0200
-KEYBOARD_readptr 	= $0000
-KEYBOARD_writeptr 	= $0001
-KEYBOARD_flags		= $0002 ; Keyboard modifiers: %xxxxrcas, r:release, c:ctrl, a:alt, s:shift
+KEYBOARD_BUFFER 		= $0200
+KEYBOARD_readptr 		= $0000
+KEYBOARD_writeptr 		= $0001
+KEYBOARD_flags			= $0002 ; Keyboard modifiers: %xxxxrcas, r:release, c:ctrl, a:alt, s:shift
 
-SCREEN_xptr		= $0010
-SCREEN_yptr		= $0011
-SCREEN_addressBuf	= $0014 ; 2 byte buffer
-SCREEN_charBuf		= $0016
+SCREEN_xptr				= $0010
+SCREEN_yptr				= $0011
+SCREEN_printStringBuf	= $0012 ; 2 byte buffer
+SCREEN_addressBuf		= $0014 ; 2 byte buffer
+SCREEN_charBuf			= $0016
 
-KEYBOARD_super		= %01000000
-KEYBOARD_altgr		= %00100000
-KEYBOARD_ext		= %00010000
-KEYBOARD_release 	= %00001000
-KEYBOARD_ctrl		= %00000100
-KEYBOARD_alt		= %00000010
-KEYBOARD_shift		= %00000001
+KEYBOARD_super			= %01000000
+KEYBOARD_altgr			= %00100000
+KEYBOARD_ext			= %00010000
+KEYBOARD_release 		= %00001000
+KEYBOARD_ctrl			= %00000100
+KEYBOARD_alt			= %00000010
+KEYBOARD_shift			= %00000001
 
 seed0       = $0020
 seed1       = $0021
@@ -91,6 +92,20 @@ reset:
 	lda #$05
 	sta SCREEN_addressBuf
 
+; init prng
+    lda #$63
+    sta seed1
+    sta seed0
+
+newGame:
+	lda #$00
+	sta SCREEN_charBuf
+	sta FRUIT_xptr
+	sta FRUIT_yptr
+	sta HEAD_ptr
+	sta TAIL_ptr
+	sta HEAD_dir
+
 ; init screen pointer
     lda #40         ; 0.5*XWIDTH
 	ldx HEAD_ptr
@@ -99,21 +114,30 @@ reset:
     lda #16         ; 0.5*YWIDTH
 	sta SNAKE_yStack, x
     sta SCREEN_yptr
-
-; init prng
-    lda #$63
-    sta seed1
-    sta seed0
     
 ; place 1st fruit
     jsr fruit_place
 
 loop:
-	jsr move_head
+	jmp move_head ;move_head is basically a subroutine
 
+loop_headMoveDone:
+; check if new head position is currently a drawn body-pixel
+	ldx HEAD_ptr
+	lda SNAKE_xStack, x
+	sta SCREEN_xptr
+	lda SNAKE_yStack, X
+	sta SCREEN_yptr
+	jsr screen_computeAddress
+
+	lda (SCREEN_addressBuf)
+	cpx #$ff
+	bne loop_noCollision
+	jmp gameOver
+
+loop_noCollision:
 ; draw new head
 	jsr draw_head
-
 
 ; check if fruit is hit
 	ldx HEAD_ptr
@@ -138,11 +162,10 @@ loop_nofruit:
     jsr screen_computeAddress
     lda #$20 ; $20 is SPACE 
     sta (SCREEN_addressBuf)
-; inc tail position
+; increment tail position
 	inc TAIL_ptr
 
 loop_fruit_done:
-
 	jsr tick_delay
 loop_handleInputs:
 ; handle keyboard inputs
@@ -159,7 +182,10 @@ loop_handleInputs:
 	jmp loop_handleInputs
 controlChar_handler_jumpMark:
 	jmp controlChar_handler
-; end of loop
+
+	; end of loop
+
+
 draw_head:
 	ldx HEAD_ptr
 	lda SNAKE_xStack, x
@@ -198,7 +224,7 @@ move_head_up:
 	inx
 	sta SNAKE_xStack, x
 	stx HEAD_ptr		; store new head-pos
-	rts
+	jmp loop_headMoveDone
 
 move_head_left:
 	ldx HEAD_ptr
@@ -214,7 +240,7 @@ move_head_left:
 	inx
 	sta SNAKE_yStack, x
 	stx HEAD_ptr		; store new head-pos
-	rts
+	jmp loop_headMoveDone
 
 move_head_down:
 	ldx HEAD_ptr
@@ -231,7 +257,7 @@ move_head_down:
 	inx
 	sta SNAKE_xStack, x
 	stx HEAD_ptr		; store new head-pos
-	rts
+	jmp loop_headMoveDone
 
 
 move_head_right:
@@ -249,11 +275,11 @@ move_head_right:
 	inx
 	sta SNAKE_yStack, x
 	stx HEAD_ptr		; store new head-pos
+	jmp loop_headMoveDone
 
 move_done:
 ; game over
-	rts
-
+	jmp gameOver
 
 controlChar_handler:
 
@@ -307,7 +333,7 @@ fruit_place:
     jsr random
 ; do random % $1e to create valid x-pos
 	sec 
-fruit_place_sub1:
+fruit_place_sub1: ; branch point for the modulo operation1
 	sbc #$4f
 	bcs fruit_place_sub1
 	adc #$4f
@@ -341,18 +367,47 @@ tick_innerx:
 	bne tick_innery
 	rts
 
-text:
-	.string "Hello world!"
+gameOver_string:
+	.string "GAME OVER!"
+
+
+gameOver:
+	jsr screen_clearScreen	; put address of gameOver_string into SCREEN_printStringBuf
+	lda #gameOver_string
+	sta SCREEN_printStringBuf
+	lda #gameOver_string + 1
+	sta SCREEN_printStringBuf + 1
+
+	jsr screen_printString
+
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jsr tick_delay
+	jmp newGame
 
 
 screen_printString:
-	ldx #00
+	ldy #00
 screen_printString_printChar:
-	lda text, x
+	lda (SCREEN_printStringBuf), y
 	beq screen_printString_done
 
-	sta SCREEN, x
-	inx
+	jsr screen_computeAddress
+	sta (SCREEN_addressBuf)
+	iny
+	inc SCREEN_xptr
 	jmp screen_printString_printChar
 
 screen_printString_done:
@@ -382,6 +437,29 @@ screen_computeAddress:
 	pla
 	rts
 
+screen_clearScreen:
+	ldy #$1f
+screen_clearScreen_yLoop:
+	ldx #$7f
+screen_clearScreen_xLoop:
+	sty SCREEN_yptr
+	stx SCREEN_xptr
+
+	jsr screen_computeAddress
+
+	lda #" "
+	sta (SCREEN_addressBuf)
+
+
+	dex
+	cpx #$ff
+	bne screen_clearScreen_xLoop
+
+	dey
+	cpy #$ff
+	bne screen_clearScreen_yLoop
+	
+	rts
 
 
 
@@ -600,28 +678,28 @@ scancodetable:
 	.byte 	$00,	$00, 	$00,	$00,	$00,	"q",	"1",	$00,	$00,	$00,	"y",	"s",	"a",	"w",	"2",	$00
 	.byte 	$00,	"c", 	"x",	"d",	"e",	"4",	"3",	$00,	$00,	" ",	"v",	"f",	"t",	"r",	"5",	$00
 	.byte 	$00,	"n", 	"b",	"h",	"g",	"z",	"6",	$00,	$00,	$00,	"m",	"j",	"u",	"7",	"8",	$00
-	.byte 	$00,	",", 	"k",	"i",	"o",	"0",	"9",	$00,	$00,	".",	"-",	"l",	"Ã¶",	"p",	"ÃŸ",	$00
-	.byte 	$00,	$00, 	"Ã¤",	$00,	"Ã¼",	$b4,	$00,	$00,	$8c,	$00,	$0a,	"+",	$00,	"#",	$00,	$00
+	.byte 	$00,	",", 	"k",	"i",	"o",	"0",	"9",	$00,	$00,	".",	"-",	"l",	"ö",	"p",	"ß",	$00
+	.byte 	$00,	$00, 	"ä",	$00,	"ü",	$b4,	$00,	$00,	$8c,	$00,	$0a,	"+",	$00,	"#",	$00,	$00
 	.byte 	$00,	"<", 	$00,	$00,	$00,	$00,	$08,	$00,	$00,	"1",	$00,	"4",	"7",	$00,	$00,	$00
 	.byte 	"0",	",", 	"2",	"5",	"6",	"8",	$1b,	$00,	$8a,	"+",	"3",	"-",	"*",	"9",	$9a,	$00
 	.byte 	$00,	$00,	$00,	$86,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00
 
 scancodetable_shift:
-	.byte 	$00,	$88, 	$00,	$84,	$82,	$80,	$81,	$91,	$00,	$89,	$87,	$85,	$83,	"\t",	"Â°",	$00
+	.byte 	$00,	$88, 	$00,	$84,	$82,	$80,	$81,	$91,	$00,	$89,	$87,	$85,	$83,	"\t",	"°",	$00
 	.byte 	$00,	$00, 	$00,	$00,	$00,	"Q",	"!",	$00,	$00,	$00,	"Y",	"S",	"A",	"W",	"\"",	$00
-	.byte 	$00,	"C", 	"X",	"D",	"E",	"$",	"Â§",	$00,	$00,	" ",	"V",	"F",	"T",	"R",	"%",	$00
+	.byte 	$00,	"C", 	"X",	"D",	"E",	"$",	"§",	$00,	$00,	" ",	"V",	"F",	"T",	"R",	"%",	$00
 	.byte 	$00,	"N", 	"B",	"H",	"G",	"Z",	"&",	$00,	$00,	$00,	"M",	"J",	"U",	"/",	"(",	$00
-	.byte 	$00,	";", 	"K",	"I",	"O",	"=",	")",	$00,	$00,	":",	"_",	"L",	"Ã–",	"P",	"?",	$00
-	.byte 	$00,	$00, 	"Ã„",	$00,	"Ãœ",	"`",	$00,	$00,	$8c,	$00,	$0a,	"*",	$00,	"'",	$00,	$00
+	.byte 	$00,	";", 	"K",	"I",	"O",	"=",	")",	$00,	$00,	":",	"_",	"L",	"Ö",	"P",	"?",	$00
+	.byte 	$00,	$00, 	"Ä",	$00,	"Ü",	"`",	$00,	$00,	$8c,	$00,	$0a,	"*",	$00,	"'",	$00,	$00
 	.byte 	$00,	">", 	$00,	$00,	$00,	$00,	$08,	$00,	$00,	"1",	$00,	"4",	"7",	$00,	$00,	$00
 	.byte 	"0",	",", 	"2",	"5",	"6",	"8",	$1b,	$00,	$8a,	"+",	"3",	"-",	"*",	"9",	$00,	$00
 	.byte 	$00,	$00,	$00,	$86,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00
 
 scancodetable_altgr:
 	.byte 	$00,	$88, 	$00,	$84,	$82,	$80,	$81,	$91,	$00,	$89,	$87,	$85,	$83,	"\t",	$00,	$00
-	.byte 	$00,	$00, 	$00,	$00,	$00,	"@",	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	"Â²",	$00
-	.byte 	$00,	$00, 	$00,	$00,	"Â¤",	$00,	"Â³",	$00,	$00,	" ",	$00,	$00,	$00,	$00,	$00,	$00
-	.byte 	$00,	$00, 	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	"Âµ",	$00,	$00,	"{",	"[",	$00
+	.byte 	$00,	$00, 	$00,	$00,	$00,	"@",	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	"²",	$00
+	.byte 	$00,	$00, 	$00,	$00,	"¤",	$00,	"³",	$00,	$00,	" ",	$00,	$00,	$00,	$00,	$00,	$00
+	.byte 	$00,	$00, 	$00,	$00,	$00,	$00,	$00,	$00,	$00,	$00,	"µ",	$00,	$00,	"{",	"[",	$00
 	.byte 	$00,	$00, 	$00,	$00,	$00,	"}",	"]",	$00,	$00,	$00,	$00,	$00,	$00,	$00,	"\\",	$00
 	.byte 	$00,	$00, 	$00,	$00,	$00,	$00,	$00,	$00,	$8c,	$00,	$0a,	"~",	$00,	$00,	$00,	$00
 	.byte 	$00,	"|", 	$00,	$00,	$00,	$00,	$08,	$00,	$00,	$96,	$00,	$00,	$93,	$00,	$00,	$00
