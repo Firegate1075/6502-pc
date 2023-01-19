@@ -1,4 +1,4 @@
-SCREEN	= $4000 ; 79x30?-character VGA-screen (bug? why not 80x32 or 80x30)
+SCREEN	= $4000 ; 80x31?-character VGA-screen (bug? why not 80x32 or 80x30)
 
 PORTB					= $6000
 PORTA					= $6001
@@ -106,6 +106,10 @@ newGame:
 	sta TAIL_ptr
 	sta HEAD_dir
 
+; init screen
+	jsr screen_clearScreen
+	jsr screen_drawScreen
+
 ; init screen pointer
     lda #40         ; 0.5*XWIDTH
 	ldx HEAD_ptr
@@ -119,10 +123,9 @@ newGame:
     jsr fruit_place
 
 loop:
-	jmp move_head ;move_head is basically a subroutine to create the next head position
+	jsr move_head ;move_head is a subroutine to create the next head position
 
-loop_headMoveDone:
-; check if new head position is currently a drawn body-pixel
+; check if new head position is currently a drawn body-pixel or border
 	ldx HEAD_ptr
 	lda SNAKE_xStack, x
 	sta SCREEN_xptr
@@ -212,9 +215,7 @@ move_head:
 ; invalid direction: default to up
 move_head_up:
 	ldx HEAD_ptr
-	lda SNAKE_yStack, x
-	beq move_done		; skip if at upper border of screen
-	
+	lda SNAKE_yStack, x	
 	dec 				; calculate new y-position
 	inx 
 	sta SNAKE_yStack, x	; store new y-position at new head-pos
@@ -224,12 +225,11 @@ move_head_up:
 	inx
 	sta SNAKE_xStack, x
 	stx HEAD_ptr		; store new head-pos
-	jmp loop_headMoveDone
+	rts
 
 move_head_left:
 	ldx HEAD_ptr
 	lda SNAKE_xStack, x
-	beq move_done
 
 	dec
 	inx
@@ -240,13 +240,11 @@ move_head_left:
 	inx
 	sta SNAKE_yStack, x
 	stx HEAD_ptr		; store new head-pos
-	jmp loop_headMoveDone
+	rts
 
 move_head_down:
 	ldx HEAD_ptr
 	lda SNAKE_yStack, x
-	cmp #$1d
-	beq move_done
 
 	inc 
 	inx
@@ -257,14 +255,12 @@ move_head_down:
 	inx
 	sta SNAKE_xStack, x
 	stx HEAD_ptr		; store new head-pos
-	jmp loop_headMoveDone
+	rts
 
 
 move_head_right:
 	ldx HEAD_ptr
 	lda SNAKE_xStack, x
-	cmp #$4e
-	beq move_done
 
 	inc 
 	inx
@@ -275,11 +271,9 @@ move_head_right:
 	inx
 	sta SNAKE_yStack, x
 	stx HEAD_ptr		; store new head-pos
-	jmp loop_headMoveDone
+	rts
 
-move_done:
-; game over
-	jmp gameOver
+	
 
 controlChar_handler:
 
@@ -331,21 +325,17 @@ random_noEor:
 
 fruit_place:
     jsr random
-; do random % $1e to create valid x-pos
-	sec 
-fruit_place_sub1: ; branch point for the modulo operation1
-	sbc #$4f
-	bcs fruit_place_sub1
-	adc #$4f
+; do random & 0b00001111 to create valid x-index
+	and #$0f	; create random index from 0-15
+	clc
+	adc #32		; add starting x-pos
     sta FRUIT_xptr
 	sta SCREEN_xptr
     
 	jsr random
-	sec
-fruit_place_sub2:
-	sbc #$1e
-	bcs fruit_place_sub2
-	adc #$1e
+	and #$0f	; create random index from 0-15
+	clc
+	adc #7		; add starting y-pos
     sta FRUIT_yptr
 	sta SCREEN_yptr
 
@@ -409,9 +399,81 @@ gameOver:
 	jsr tick_delay
 	jsr tick_delay
 
-	jsr screen_clearScreen
 	jmp newGame
 
+screen_drawScreen:
+; upper border
+	lda #6
+	sta SCREEN_yptr 		
+	lda #31
+	sta SCREEN_xptr
+	ldx #18					; Draw 18 Border pixels horizontally
+screen_drawScreen_xloopUp:
+	jsr screen_computeAddress
+	lda #$ff
+	sta (SCREEN_addressBuf)
+
+	inc SCREEN_xptr
+	dex
+	bne screen_drawScreen_xloopUp
+; down border
+	lda #23
+	sta SCREEN_yptr
+	lda #31
+	sta SCREEN_xptr
+	ldx #18					; Draw 18 Border pixels horizontally
+screen_drawScreen_xloopDown:
+	jsr screen_computeAddress
+	lda #$ff
+	sta (SCREEN_addressBuf)
+	
+	inc SCREEN_xptr
+	dex
+	bne screen_drawScreen_xloopDown
+; left border
+	lda #31
+	sta SCREEN_xptr
+	lda #6					; Draw 18 Border pixels vertically
+	sta SCREEN_yptr
+	ldx #18
+screen_drawScreen_xloopLeft:
+	jsr screen_computeAddress
+	lda #$ff
+	sta (SCREEN_addressBuf)
+
+	inc SCREEN_yptr
+	dex
+	bne screen_drawScreen_xloopLeft
+; right border
+	lda #48
+	sta SCREEN_xptr
+	lda #6
+	sta SCREEN_yptr
+	ldx #18
+screen_drawScreen_xloopRight:
+	jsr screen_computeAddress
+	lda #$ff
+	sta (SCREEN_addressBuf)
+
+	inc SCREEN_yptr
+	dex
+	bne screen_drawScreen_xloopRight
+; print SNAKE GAME!
+	lda #screen_snakeString & $ff
+	sta SCREEN_printStringBuf
+	lda #screen_snakeString >> 8
+	sta SCREEN_printStringBuf + 1
+
+	lda #35 
+	sta SCREEN_xptr
+	lda # 4
+	sta SCREEN_yptr
+	jsr screen_printString
+
+	rts
+
+screen_snakeString:
+	.string "SNAKE GAME!"
 
 screen_printString:
 	ldy #00
